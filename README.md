@@ -1,38 +1,176 @@
-# Online Chess
+Networked Chess (networked-chess)
 
 A two-player online chess game built in Python with Pygame and raw TCP sockets.
 
-This project lets two players connect to a server, enter usernames, pair with each other, and play chess in real time. The game uses a custom client-server networking system instead of a game networking library.
+Networked Chess lets two players connect through a relay server, pair by username, and play on a graphical chess board in real time. The project implements its own TCP client-server protocol with JSON messages rather than relying on a game-networking framework.
 
-## Features
+The server coordinates player connections, assigns colors, and relays moves. Each client renders the board, calculates available moves, and updates its local game state.
 
-- Two-player online chess
-- Pygame graphical board
-- Raw TCP socket networking
-- JSON-based client/server messages
-- Username-based player connection system
-- Randomized first turn
-- Board flipping for black/white perspective
-- Legal move highlighting
-- Piece movement logic for pawns, bishops, knights, rooks, queens, and kings
-- Board reset support
-- Quit/disconnect support
+Table of Contents
 
-## Tech Stack
+* Security
+* Background
+* Install
+* Usage
+* Architecture
+* Network Protocol
+* Project Structure
+* Current Limitations
+* Maintainer
+* Contributing
+* License
 
-- Python
-- Pygame
-- Python `socket` module
-- Python `threading` module
-- JSON message formatting
+Security
 
-## Project Structure
+This project is an educational prototype and should not be treated as a production-ready game server.
 
-```text
-chess/
+* Traffic is not encrypted.
+* Usernames and control messages are not authenticated.
+* The server trusts moves submitted by clients.
+* kill.py sends an unauthenticated shutdown request.
+* The server stores connection and game state only in memory.
+
+Do not expose the server to an untrusted network without first adding authentication, authorization, input validation, rate limiting, and encrypted transport. Never commit private keys, passwords, tokens, or other credentials to this repository.
+
+Background
+
+This project was created to explore how a real-time multiplayer game can be built from the ground up. It combines chess movement logic, a Pygame interface, TCP sockets, threads, JSON serialization, and a relay-server architecture.
+
+The main abstract dependencies are:
+
+* A graphical client that renders the board and handles player input.
+* A TCP client that exchanges framed JSON messages with the server.
+* A relay server that pairs users, assigns turns, and forwards moves.
+* A shared understanding of board coordinates and message formats.
+
+All chess movement and networking logic in this repository is implemented directly rather than through a chess engine or game-networking library.
+
+Install
+
+Dependencies
+
+* Python 3
+* Pygame
+* Git, if cloning the repository from GitHub
+
+Clone the repository and enter its directory:
+
+git clone https://github.com/NeefMan/networked-chess.git
+cd networked-chess
+
+Create and activate a virtual environment on macOS or Linux:
+
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install pygame
+
+On Windows PowerShell:
+
+py -m venv .venv
+.venv\Scripts\Activate.ps1
+py -m pip install pygame
+
+Usage
+
+Configure the server address
+
+The server listens on every network interface at TCP port 5000. For local testing, set the host in client.py to the loopback address:
+
+self.HOST = "127.0.0.1"
+self.PORT = 5000
+
+For internet play, replace 127.0.0.1 with the server’s public IP address or hostname. Allow inbound TCP traffic on port 5000 only from networks or addresses you trust.
+
+Start the server
+
+Run this command from the repository root:
+
+python3 server.py
+
+Windows users may use:
+
+py server.py
+
+Start two clients
+
+Each player runs the graphical client from a separate computer or terminal:
+
+python3 main.py
+
+Windows users may use:
+
+py main.py
+
+Both players should enter unique usernames and enter each other’s usernames when prompted. The server waits for the requested opponent, pairs the players, and randomly assigns the first turn.
+
+CLI
+
+Player pairing occurs through terminal prompts before the Pygame window starts:
+
+What is your username? alice
+Who would you like to connect to? bob
+Connected to server
+Successfully connected to user: bob
+
+Controls
+
+Input	Action
+Left-click a piece	Select the piece
+Left-click a highlighted square	Move the selected piece
+F	Flip the board
+R	Reset the board for both players
+Q	Disconnect and quit
+
+Architecture
+
+Each player runs main.py, which creates the Pygame interface and initializes a Client instance from client.py.
+
+The client:
+
+1. Opens a TCP connection to the relay server.
+2. Registers a username and requested opponent.
+3. Receives its assigned turn and color.
+4. Sends local moves to the server.
+5. Polls the server for the opponent’s moves.
+6. Applies received moves to the local board.
+
+The server in server.py accepts multiple socket connections and handles each connection in a daemon thread. It stores usernames, sockets, pending moves, turn assignments, and connection timestamps in memory.
+
+The server currently acts as a relay rather than an authoritative chess engine. Legal move calculations happen on each client.
+
+Network Protocol
+
+Messages are serialized as JSON and terminated with the custom delimiter:
+
+*&^%
+
+A move request has the following form:
+
+{
+  "username": "alice",
+  "task": "move",
+  "to_user": "bob",
+  "move": [[4, 6], [4, 4]]
+}
+
+Other task values used by the current protocol include:
+
+* connect
+* check_move
+* reset
+* dc
+* kill
+
+The protocol is internal and may change while the project is in development.
+
+Project Structure
+
+networked-chess/
+├── README.md
 ├── main.py
 ├── client.py
 ├── server.py
+├── kill.py
 ├── classic_piece_map.py
 └── images/
     └── pieces/
@@ -48,226 +186,50 @@ chess/
         ├── black_queen.png
         ├── white_king.png
         └── black_king.png
-```
 
-## File Overview
+* main.py contains the game loop, board rendering, piece classes, movement logic, controls, and client integration.
+* client.py handles server configuration, pairing, sending messages, receiving moves, and disconnecting.
+* server.py accepts players, assigns turns, relays moves, and forwards reset requests.
+* kill.py sends the server’s current shutdown task and is intended only for controlled development environments.
+* classic_piece_map.py defines the initial board layout.
+* images/pieces/ contains the chess-piece sprites.
 
-### `main.py`
+Current Limitations
 
-This is the main game file. It starts the client, creates the Pygame window, builds the chess board, handles player input, and runs the main game loop.
+* The server address is hardcoded in client.py.
+* The protocol has no authentication or encryption.
+* The server does not independently validate moves.
+* Check and checkmate are not implemented.
+* Castling is not implemented.
+* En passant is not implemented.
+* Pawn promotion is not implemented.
+* There is no automatic matchmaking.
+* There is no reconnect or game-recovery system.
+* There is no move history, timer, or captured-piece display.
+* Server state is lost when the process stops.
+* The game is not packaged as a standalone executable.
 
-The `Game` class initializes the network client, starts the client listener thread, creates the board, and runs the Pygame event loop.
+Maintainer
 
-The `Board` class handles:
+* Ethan Lahr (@NeefMan)
 
-- Drawing the board
-- Drawing pieces
-- Detecting clicked squares
-- Flipping the board
-- Selecting pieces
-- Computing valid moves
-- Moving pieces
-- Sending player moves to the server
+Contributing
 
-The piece classes are also stored in this file:
+Questions may be asked by opening an issue in the NeefMan/networked-chess GitHub repository.
 
-- `Piece`
-- `Pawn`
-- `Bishop`
-- `Knight`
-- `Rook`
-- `Queen`
-- `King`
+Pull requests are welcome. Before contributing:
 
-Each piece has a `move_set` that defines how it is allowed to move.
+1. Open an issue before making a large behavioral or protocol change.
+2. Keep changes focused and explain the reason for them.
+3. Test changes with one server and two connected clients.
+4. Keep Python examples and source code consistent with the project’s existing style.
+5. Do not commit virtual environments, __pycache__ directories, credentials, or private server information.
+6. Update this README when installation, controls, protocol messages, or behavior changes.
 
-### `client.py`
+No contributor sign-off is currently required.
 
-This file handles the client-side networking.
+License
 
-The client connects to the server, asks the user for their username, asks who they want to connect to, and sends a connection request to the server.
+UNLICENSED — Copyright (c) Ethan Lahr.
 
-The client sends and receives JSON data over a TCP socket. Each message ends with a custom delimiter so the receiver can tell where one complete message ends.
-
-The client also runs a background loop that checks for moves from the other player. When a move is received, it updates the local board.
-
-### `server.py`
-
-This file runs the relay server.
-
-The server listens on port `5000`, accepts client connections, stores user data, and forwards moves between players.
-
-The server keeps track of:
-
-- Each username
-- The user's socket connection
-- The user's opponent
-- Pending moves
-- Turn assignment
-- Connection timestamps
-
-When two users connect to each other, the server randomly chooses who goes first. When one player makes a move, the server stores that move for the other player to receive.
-
-### `classic_piece_map.py`
-
-This file stores the starting board layout.
-
-It maps board coordinates to piece abbreviations. For example:
-
-- `wp` = white pawn
-- `bp` = black pawn
-- `wr` = white rook
-- `br` = black rook
-- `wq` = white queen
-- `bq` = black queen
-- `wki` = white king
-- `bki` = black king
-
-## How the Game Works
-
-The game uses a client-server model.
-
-Each player runs `main.py`. When the game starts, the client asks for:
-
-1. Your username
-2. The username of the player you want to connect to
-
-The client then connects to the server and sends a connection request.
-
-The server waits until both users are connected. Once both players are available, it randomly assigns the first turn. One player starts as white and the other starts as black.
-
-When a player makes a move:
-
-1. The player clicks a piece.
-2. The game calculates valid moves for that piece.
-3. The player clicks a destination square.
-4. The client sends the move to the server.
-5. The server stores the move for the opponent.
-6. The opponent's client checks the server for a move.
-7. The opponent's board updates.
-
-## Controls
-
-| Key / Action | What it does |
-|---|---|
-| Left click a piece | Selects a piece |
-| Left click a valid square | Moves the selected piece |
-| `F` | Flips the board |
-| `R` | Resets the board for both players |
-| `Q` | Disconnects and quits |
-
-## Setup
-
-Install Python and Pygame.
-
-```bash
-pip install pygame
-```
-
-Clone the repository:
-
-```bash
-git clone https://github.com/NeefMan/chess.git
-cd chess
-```
-
-## Running the Server
-
-Start the server first:
-
-```bash
-python server.py
-```
-
-The server listens on:
-
-```text
-0.0.0.0:5000
-```
-
-If the server is hosted on AWS EC2 or another cloud server, make sure TCP port `5000` is open in the firewall/security group.
-
-## Running the Client
-
-Start the game client:
-
-```bash
-python main.py
-```
-
-The client currently connects to the server IP address set in `client.py`.
-
-```python
-self.HOST = "18.218.245.80"
-self.PORT = 5000
-```
-
-To use a different server, change `HOST` to your server's public IP address.
-
-## Networking Format
-
-The game sends JSON data over TCP sockets.
-
-Each message is converted to JSON and then has this delimiter added to the end:
-
-```text
-*&^%
-```
-
-This lets the receiver know when a full message has arrived.
-
-Example move request:
-
-```json
-{
-  "username": "player1",
-  "task": "move",
-  "to_user": "player2",
-  "move": [[0, 6], [0, 4]]
-}
-```
-
-## Current Limitations
-
-This project is still in development. Some chess rules and networking features may need more work.
-
-Current limitations include:
-
-- Server IP is hardcoded in `client.py`
-- No menu screen for entering server settings
-- No automatic matchmaking
-- No reconnect system
-- No check or checkmate detection
-- No castling
-- No en passant
-- No pawn promotion
-- No move history
-- No packaged executable
-- The server stores user state in memory only
-
-## Possible Future Improvements
-
-- Add a start menu
-- Let the user type the server IP in the game window
-- Add check and checkmate detection
-- Add castling
-- Add pawn promotion
-- Add en passant
-- Add move history
-- Add captured piece display
-- Add timers
-- Add usernames on screen
-- Add reconnect support
-- Add better disconnect handling
-- Package the game into an executable
-- Add sound effects and animations
-
-## What I Learned
-
-This project demonstrates how a real-time multiplayer game can be built from scratch using sockets. It combines game programming, networking, threading, JSON data formatting, and object-oriented design.
-
-The most important part of the project is the custom networking system. Instead of relying on a game networking framework, the server and clients communicate directly using TCP sockets and manually formatted messages.
-
-## License
-
-This project is for educational and portfolio purposes.
+No license has been granted to copy, modify, or distribute this project.
