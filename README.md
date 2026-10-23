@@ -1,235 +1,50 @@
-Networked Chess (networked-chess)
+# Networked Chess: Two-Player Chess over TCP
 
-A two-player online chess game built in Python with Pygame and raw TCP sockets.
+Playing chess from two separate programs requires a way to pair players and keep their boards in sync. Networked Chess is a Python prototype that pairs two players by username through a TCP relay and displays each player's board with Pygame. It demonstrates socket communication, concurrent connections, and client-side game state without a chess engine or networking framework.
 
-Networked Chess lets two players connect through a relay server, pair by username, and play on a graphical chess board in real time. The project implements its own TCP client-server protocol with JSON messages rather than relying on a game-networking framework.
+## Team Members
 
-The server coordinates player connections, assigns colors, and relays moves. Each client renders the board, calculates available moves, and updates its local game state.
+- [Ethan Lahr (@NeefMan)](https://github.com/NeefMan) — author and maintainer.
 
-Table of Contents
+## Setup and Installation
 
-* Security
-* Background
-* Install
-* Usage
-* Architecture
-* Network Protocol
-* Project Structure
-* Current Limitations
-* Maintainer
-* Contributing
-* License
+**Requirements:** [uv](https://docs.astral.sh/uv/getting-started/installation/) and a desktop environment that can open a Pygame window. The repository pins Python 3.14 and `pygame-ce==2.5.8` in `.python-version`, `pyproject.toml`, and `uv.lock`. On the first `uv run`, uv sets up the Python environment and installs the locked dependency automatically.
 
-Security
-
-This project is an educational prototype and should not be treated as a production-ready game server.
-
-* Traffic is not encrypted.
-* Usernames and control messages are not authenticated.
-* The server trusts moves submitted by clients.
-* kill.py sends an unauthenticated shutdown request.
-* The server stores connection and game state only in memory.
-
-Do not expose the server to an untrusted network without first adding authentication, authorization, input validation, rate limiting, and encrypted transport. Never commit private keys, passwords, tokens, or other credentials to this repository.
-
-Background
-
-This project was created to explore how a real-time multiplayer game can be built from the ground up. It combines chess movement logic, a Pygame interface, TCP sockets, threads, JSON serialization, and a relay-server architecture.
-
-The main abstract dependencies are:
-
-* A graphical client that renders the board and handles player input.
-* A TCP client that exchanges framed JSON messages with the server.
-* A relay server that pairs users, assigns turns, and forwards moves.
-* A shared understanding of board coordinates and message formats.
-
-All chess movement and networking logic in this repository is implemented directly rather than through a chess engine or game-networking library.
-
-Install
-
-Dependencies
-
-* Python 3
-* Pygame
-* Git, if cloning the repository from GitHub
-
-Clone the repository and enter its directory:
-
+```bash
 git clone https://github.com/NeefMan/networked-chess.git
 cd networked-chess
+```
 
-Create and activate a virtual environment on macOS or Linux:
+The included configuration connects two players on the same computer through `127.0.0.1:5001`. Keep the server running in the first terminal:
 
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install pygame
+```bash
+uv run server.py
+```
 
-On Windows PowerShell:
+In **each of two other terminals**, start a player:
 
-py -m venv .venv
-.venv\Scripts\Activate.ps1
-py -m pip install pygame
+```bash
+uv run main.py
+```
 
-Usage
+Use different usernames and enter each other's username as the opponent. For example, enter `alice` then `bob` in one client, and `bob` then `alice` in the other. The first client waits for the second before opening the board. Run `main.py`, not `client.py`. `client.py` only defines the networking class. Press **Ctrl+C** in the server terminal when finished.
 
-Configure the server address
+## Project Highlights
 
-The server listens on every network interface at TCP port 5000. For local testing, set the host in client.py to the loopback address:
+- **One server, two clients:** a threaded server pairs players, randomly assigns the first turn, and relays moves between two graphical clients.
+- **A small custom protocol:** JSON messages carry usernames, moves, and reset requests; a delimiter separates messages on the TCP stream.
+- **Interactive 8 × 8 board:** the clients display piece sprites, highlight available moves, flip the board, and reset both boards.
 
-self.HOST = "127.0.0.1"
-self.PORT = 5000
+## How It Works
 
-For internet play, replace 127.0.0.1 with the server’s public IP address or hostname. Allow inbound TCP traffic on port 5000 only from networks or addresses you trust.
+1. **Connect and pair.** `main.py` creates a `Client`, asks for a username and opponent, and connects to `server.py`. The server handles each connection in a separate thread so one player can wait while the other joins. When both usernames are registered, it randomly chooses who moves first; the clients map that choice to white and black.
+2. **Frame messages.** Client and server serialize requests as JSON followed by `*&^%`. TCP delivers a stream of bytes, so the delimiter lets the receiver identify the end of a message. For example:
 
-Start the server
+   ```text
+   {"username":"alice","task":"move","to_user":"bob","move":[[4,6],[4,4]]}*&^%
+   ```
 
-Run this command from the repository root:
+3. **Calculate and relay a move.** `main.py` calculates available destinations from its local board state. When a player moves, `client.py` sends the source and destination coordinates. `server.py` stores that move for the named opponent; it does not check whether the move is legal.
+4. **Update the other board.** Each client polls the server for a pending move about once per second. On receipt, it applies the coordinates to its own board and switches turns. `R` sends a reset request through the server so both clients recreate their boards.
 
-python3 server.py
-
-Windows users may use:
-
-py server.py
-
-Start two clients
-
-Each player runs the graphical client from a separate computer or terminal:
-
-python3 main.py
-
-Windows users may use:
-
-py main.py
-
-Both players should enter unique usernames and enter each other’s usernames when prompted. The server waits for the requested opponent, pairs the players, and randomly assigns the first turn.
-
-CLI
-
-Player pairing occurs through terminal prompts before the Pygame window starts:
-
-What is your username? alice
-Who would you like to connect to? bob
-Connected to server
-Successfully connected to user: bob
-
-Controls
-
-Input	Action
-Left-click a piece	Select the piece
-Left-click a highlighted square	Move the selected piece
-F	Flip the board
-R	Reset the board for both players
-Q	Disconnect and quit
-
-Architecture
-
-Each player runs main.py, which creates the Pygame interface and initializes a Client instance from client.py.
-
-The client:
-
-1. Opens a TCP connection to the relay server.
-2. Registers a username and requested opponent.
-3. Receives its assigned turn and color.
-4. Sends local moves to the server.
-5. Polls the server for the opponent’s moves.
-6. Applies received moves to the local board.
-
-The server in server.py accepts multiple socket connections and handles each connection in a daemon thread. It stores usernames, sockets, pending moves, turn assignments, and connection timestamps in memory.
-
-The server currently acts as a relay rather than an authoritative chess engine. Legal move calculations happen on each client.
-
-Network Protocol
-
-Messages are serialized as JSON and terminated with the custom delimiter:
-
-*&^%
-
-A move request has the following form:
-
-{
-  "username": "alice",
-  "task": "move",
-  "to_user": "bob",
-  "move": [[4, 6], [4, 4]]
-}
-
-Other task values used by the current protocol include:
-
-* connect
-* check_move
-* reset
-* dc
-* kill
-
-The protocol is internal and may change while the project is in development.
-
-Project Structure
-
-networked-chess/
-├── README.md
-├── main.py
-├── client.py
-├── server.py
-├── kill.py
-├── classic_piece_map.py
-└── images/
-    └── pieces/
-        ├── white_pawn.png
-        ├── black_pawn.png
-        ├── white_bishop.png
-        ├── black_bishop.png
-        ├── white_knight.png
-        ├── black_knight.png
-        ├── white_rook.png
-        ├── black_rook.png
-        ├── white_queen.png
-        ├── black_queen.png
-        ├── white_king.png
-        └── black_king.png
-
-* main.py contains the game loop, board rendering, piece classes, movement logic, controls, and client integration.
-* client.py handles server configuration, pairing, sending messages, receiving moves, and disconnecting.
-* server.py accepts players, assigns turns, relays moves, and forwards reset requests.
-* kill.py sends the server’s current shutdown task and is intended only for controlled development environments.
-* classic_piece_map.py defines the initial board layout.
-* images/pieces/ contains the chess-piece sprites.
-
-Current Limitations
-
-* The server address is hardcoded in client.py.
-* The protocol has no authentication or encryption.
-* The server does not independently validate moves.
-* Check and checkmate are not implemented.
-* Castling is not implemented.
-* En passant is not implemented.
-* Pawn promotion is not implemented.
-* There is no automatic matchmaking.
-* There is no reconnect or game-recovery system.
-* There is no move history, timer, or captured-piece display.
-* Server state is lost when the process stops.
-* The game is not packaged as a standalone executable.
-
-Maintainer
-
-* Ethan Lahr (@NeefMan)
-
-Contributing
-
-Questions may be asked by opening an issue in the NeefMan/networked-chess GitHub repository.
-
-Pull requests are welcome. Before contributing:
-
-1. Open an issue before making a large behavioral or protocol change.
-2. Keep changes focused and explain the reason for them.
-3. Test changes with one server and two connected clients.
-4. Keep Python examples and source code consistent with the project’s existing style.
-5. Do not commit virtual environments, __pycache__ directories, credentials, or private server information.
-6. Update this README when installation, controls, protocol messages, or behavior changes.
-
-No contributor sign-off is currently required.
-
-License
-
-UNLICENSED — Copyright (c) Ethan Lahr.
-
-No license has been granted to copy, modify, or distribute this project.
+This split keeps the server small and makes the socket protocol easy to inspect, but it trusts clients to maintain valid game state.
